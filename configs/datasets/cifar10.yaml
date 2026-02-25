@@ -1,0 +1,14 @@
+# CIFAR10 Dataset Configuration
+name: cifar10
+image_size: 32
+in_channels: 3
+out_channels: 3
+num_classes: 10
+normalize_mean:
+  - 0.5
+  - 0.5
+  - 0.5
+normalize_std:
+  - 0.5
+  - 0.5
+  - 0.5

@@ -1,0 +1,19 @@
+[project]
+name = "pixeldit"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "einops",
+    "pyyaml",
+    "tqdm",
+    "accelerate",
+    "imageio>=2.37.2",
+]
+
+[tool.setuptools]
+packages = ["pixel_dit"]
+

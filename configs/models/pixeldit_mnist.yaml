@@ -1,0 +1,33 @@
+# PixelDiT Model Configuration for MNIST
+model_type: pixeldit
+
+# Image parameters
+image_size: 28
+patch_size: 4  # semantic_patch_size
+channels: 1
+
+# PixelDiT architecture parameters
+dit_dim: 128      # Dimension for Semantic Path
+pit_dim: 16       # Dimension for Pixel Path
+dit_depth: 6      # Semantic path depth
+pit_depth: 2      # Pixel path depth
+heads: 4
+dim_head: 32
+mlp_ratio: 4.0
+qk_norm: 'rmsnorm'
+
+# Regularization
+dropout: 0.0
+
+# Class-conditional generation
+num_classes: 10
+class_dropout_prob: 0.1
+
+# PixelDiT-specific
+compress_ratio: 4
+use_abs_pe: true
+
+# RectifiedFlow parameters
+t_eps: 5e-2
+P_mean: -0.8
+P_std: 0.8
