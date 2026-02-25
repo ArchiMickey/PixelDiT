@@ -2,6 +2,8 @@
 
 This repository is an **unofficial reimplementation** of **PixelDiT** ([PixelDiT: Pixel-level Diffusion Transformer for Image Generation](https://arxiv.org/abs/2511.20645)). It provides a unified framework for training and sampling from both standard Diffusion Transformers (DiT) and PixelDiT models on datasets like MNIST and CIFAR10 using Rectified Flow, especially on pixel space. This repo is designed to be more than just an reimplementation of PixelDiT and include latest (up to this moment) tricks in diffusion models.This repo can be a good starting point for researchers and practitioners interested in diffusion models and DiT architectures.
 
+![PixelDiT Overview](docs/image.png)
+
 ## Features
 
 - **Unofficial PixelDiT Implementation**: Based on the architecture described in [PixelDiT: Pixel Diffusion Transformers for Image Generation](https://arxiv.org/abs/2511.20645). Using learnable registers for Multi-modal version.
