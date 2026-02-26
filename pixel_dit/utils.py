@@ -13,22 +13,23 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from pixel_dit.model import DiT, PixelDiT, MMDiT, MMPixelDiT
-from pixel_dit.config import ModelConfig, DatasetConfig
+from pixel_dit.models.model_dit import DiT, DiT_Tiny, create_dit_model
+from pixel_dit.models.model_pixeldit import PixelDiT, PixelDiT_Tiny, create_pixeldit_model
+from pixel_dit.models.model_mmdit import MMDiT, MMDiT_Tiny, create_mmdit_model
+from pixel_dit.models.model_mmpixeldit import MMPixelDiT, MMPixelDiT_Tiny, create_mmpixeldit_model
+from pixel_dit.config import DatasetConfig
 
 
 def create_model(
     model_type: str,
     dataset_config: DatasetConfig,
-    model_config: Optional[ModelConfig] = None,
 ) -> nn.Module:
     """
     Factory function to create a DiT, PixelDiT, MMDiT or MMPixelDiT model.
     
     Args:
-        model_type: 'dit', 'pixeldit', 'mmdit' or 'mmpixeldit'
+        model_type: Model name in format '{model_type}-{size}/{patch_size}'
         dataset_config: Dataset configuration containing image size, channels, etc.
-        model_config: Optional model configuration. If None, uses defaults.
     
     Returns:
         Model instance
@@ -38,156 +39,33 @@ def create_model(
     """
     model_type = model_type.lower()
     
-    if model_type == 'dit':
-        if model_config is None:
-            # Default DiT config
-            model = DiT(
-                image_size=dataset_config.image_size,
-                patch_size=4,
-                channels=dataset_config.in_channels,
-                dim=128,
-                depth=6,
-                heads=4,
-                dim_head=32,
-                dropout=0.0,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=0.1,
-                qk_norm='rmsnorm'
-            )
-        else:
-            model = DiT(
-                image_size=dataset_config.image_size,
-                patch_size=model_config.patch_size,
-                channels=dataset_config.in_channels,
-                dim=model_config.dim,
-                depth=model_config.depth,
-                heads=model_config.heads,
-                dim_head=model_config.dim_head,
-                mlp_ratio=model_config.mlp_ratio,
-                dropout=model_config.dropout,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=model_config.class_dropout_prob,
-                use_abs_pe=model_config.use_abs_pe,
-                qk_norm=model_config.qk_norm
-            )
+    kwargs = {
+        'image_size': dataset_config.image_size,
+        'channels': dataset_config.in_channels,
+        'num_classes': dataset_config.num_classes,
+    }
+
+    if model_type.startswith('dit-'):
+        model = create_dit_model(model_type, **kwargs)
+    elif model_type.startswith('pixeldit-'):
+        model = create_pixeldit_model(model_type, **kwargs)
+    elif model_type.startswith('mmdit-'):
+        model = create_mmdit_model(model_type, **kwargs)
+    elif model_type.startswith('mmpixeldit-'):
+        model = create_mmpixeldit_model(model_type, **kwargs)
+    # Legacy support
+    elif model_type == 'dit':
+        model = DiT_Tiny(**kwargs)
     elif model_type == 'pixeldit':
-        if model_config is None:
-            # Default PixelDiT config
-            model = PixelDiT(
-                image_size=dataset_config.image_size,
-                semantic_patch_size=4,
-                channels=dataset_config.in_channels,
-                dit_dim=128,
-                pit_dim=16,
-                dit_depth=6,
-                pit_depth=2,
-                heads=4,
-                dim_head=32,
-                mlp_ratio=4.0,
-                dropout=0.0,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=0.1,
-                compress_ratio=4,
-                use_abs_pe=True,
-                qk_norm='rmsnorm'
-            )
-        else:
-            model = PixelDiT(
-                image_size=dataset_config.image_size,
-                semantic_patch_size=model_config.patch_size,
-                channels=dataset_config.in_channels,
-                dit_dim=model_config.dit_dim,
-                pit_dim=model_config.pit_dim,
-                dit_depth=model_config.dit_depth,
-                pit_depth=model_config.pit_depth,
-                heads=model_config.heads,
-                dim_head=model_config.dim_head,
-                mlp_ratio=model_config.mlp_ratio,
-                dropout=model_config.dropout,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=model_config.class_dropout_prob,
-                compress_ratio=model_config.compress_ratio,
-                use_abs_pe=model_config.use_abs_pe,
-                qk_norm=model_config.qk_norm
-            )
+        model = PixelDiT_Tiny(**kwargs)
     elif model_type == 'mmdit':
-        if model_config is None:
-            # Default MMDiT config
-            model = MMDiT(
-                image_size=dataset_config.image_size,
-                patch_size=4,
-                channels=dataset_config.in_channels,
-                dim=128,
-                depth=6,
-                heads=4,
-                dim_head=32,
-                dropout=0.0,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=0.1,
-                qk_norm='rmsnorm'
-            )
-        else:
-            model = MMDiT(
-                image_size=dataset_config.image_size,
-                patch_size=model_config.patch_size,
-                channels=dataset_config.in_channels,
-                dim=model_config.dim,
-                depth=model_config.depth,
-                heads=model_config.heads,
-                dim_head=model_config.dim_head,
-                mlp_ratio=model_config.mlp_ratio,
-                dropout=model_config.dropout,
-                num_classes=dataset_config.num_classes,
-                num_registers=model_config.num_registers,
-                class_dropout_prob=model_config.class_dropout_prob,
-                use_abs_pe=model_config.use_abs_pe,
-                qk_norm=model_config.qk_norm
-            )
+        model = MMDiT_Tiny(**kwargs)
     elif model_type == 'mmpixeldit':
-        if model_config is None:
-            # Default MMPixelDiT config
-            model = MMPixelDiT(
-                image_size=dataset_config.image_size,
-                semantic_patch_size=4,
-                channels=dataset_config.in_channels,
-                dit_dim=128,
-                pit_dim=16,
-                dit_depth=6,
-                pit_depth=2,
-                heads=4,
-                dim_head=32,
-                mlp_ratio=4.0,
-                dropout=0.0,
-                num_classes=dataset_config.num_classes,
-                class_dropout_prob=0.1,
-                compress_ratio=4,
-                use_abs_pe=True,
-                qk_norm='rmsnorm'
-            )
-        else:
-            model = MMPixelDiT(
-                image_size=dataset_config.image_size,
-                semantic_patch_size=model_config.patch_size,
-                channels=dataset_config.in_channels,
-                dit_dim=model_config.dit_dim,
-                pit_dim=model_config.pit_dim,
-                dit_depth=model_config.dit_depth,
-                pit_depth=model_config.pit_depth,
-                heads=model_config.heads,
-                dim_head=model_config.dim_head,
-                mlp_ratio=model_config.mlp_ratio,
-                dropout=model_config.dropout,
-                num_classes=dataset_config.num_classes,
-                num_registers=model_config.num_registers,
-                class_dropout_prob=model_config.class_dropout_prob,
-                compress_ratio=model_config.compress_ratio,
-                use_abs_pe=model_config.use_abs_pe,
-                qk_norm=model_config.qk_norm,
-            )
+        model = MMPixelDiT_Tiny(**kwargs)
     else:
         raise ValueError(
             f"Unsupported model type: {model_type}. "
-            f"Supported types: 'dit', 'pixeldit', 'mmdit', 'mmpixeldit'"
+            f"Supported types: 'dit-{{size}}/{{patch_size}}', 'pixeldit-{{size}}/{{patch_size}}', 'mmdit-{{size}}/{{patch_size}}', 'mmpixeldit-{{size}}/{{patch_size}}'"
         )
     
     return model
@@ -315,8 +193,10 @@ def get_output_dirs(
         return checkpoint_dir, results_dir
     
     # Default directories: checkpoints/{model}/{dataset}
-    default_checkpoint_dir = os.path.join('checkpoints', model_type, dataset_name)
-    default_results_dir = os.path.join('results', model_type, dataset_name)
+    # Replace '/' with '_' in model_type to avoid nested directories
+    safe_model_type = model_type.replace('/', '_')
+    default_checkpoint_dir = os.path.join('checkpoints', safe_model_type, dataset_name)
+    default_results_dir = os.path.join('results', safe_model_type, dataset_name)
     
     checkpoint_dir = checkpoint_dir if checkpoint_dir is not None else default_checkpoint_dir
     results_dir = results_dir if results_dir is not None else default_results_dir
@@ -355,9 +235,11 @@ def save_checkpoint(
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Backward-compatible checkpoint naming
+    # Replace '/' with '_' in model_type to avoid creating subdirectories in the filename
+    safe_model_type = model_type.replace('/', '_')
     checkpoint_path = os.path.join(
         checkpoint_dir,
-        f"{model_type}_{dataset_name}_epoch_{epoch}.pt"
+        f"{safe_model_type}_{dataset_name}_epoch_{epoch}.pt"
     )
     
     checkpoint_data = {

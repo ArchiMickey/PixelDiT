@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import re
 from einops import rearrange
 from einops.layers.torch import Rearrange
 
@@ -473,305 +474,6 @@ class PixelDiTFinalLayer(nn.Module):
 
 # --- Models ---
 
-class DiT(nn.Module):
-    def __init__(
-        self,
-        *,
-        image_size=32,
-        patch_size=4,
-        channels=3,
-        dim=128,
-        depth=6,
-        heads=4,
-        dim_head=32,
-        mlp_ratio=4.0,
-        dropout=0.1,
-        num_classes=10,
-        class_dropout_prob=0.1,
-        use_abs_pe=True,
-        qk_norm=False
-    ):
-        super().__init__()
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.use_abs_pe = use_abs_pe
-        self.num_classes = num_classes
-        self.class_dropout_prob = class_dropout_prob
-        self.dim_head = dim_head
-        
-        self.base_h = self.base_w = image_size // patch_size
-        
-        self.to_patch_embedding = nn.Sequential(
-            nn.Conv2d(channels, dim, kernel_size=patch_size, stride=patch_size),
-            Rearrange('b c h w -> b (h w) c'),
-        )
-
-        if use_abs_pe:
-            self.pos_embedding = nn.Parameter(torch.randn(1, self.base_h * self.base_w, dim))
-
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim * 4),
-            nn.SiLU(),
-            nn.Linear(dim * 4, dim)
-        )
-
-        self.class_embed = nn.Embedding(num_classes + 1, dim)
-
-        self.blocks = nn.ModuleList([
-            DiTBlock(dim, heads, dim_head, mlp_ratio, dropout, qk_norm=qk_norm)
-            for _ in range(depth)
-        ])
-
-        self.final_layer = FinalLayer(dim, channels * patch_size ** 2)
-
-    def forward(self, x, times, y=None):
-        b, c, h, w = x.shape
-        h_patch, w_patch = h // self.patch_size, w // self.patch_size
-        
-        x = self.to_patch_embedding(x)
-
-        if self.use_abs_pe:
-            # Interpolate if resolution changes
-            pe = interpolate_pos_embed(self.pos_embedding, self.base_h, self.base_w, h_patch, w_patch)
-            x = x + pe
-
-        t_emb = self.time_mlp(times)
-        if y is None:
-            y = torch.full((b,), self.num_classes, device=x.device, dtype=torch.long)
-
-        c_emb = self.class_embed(y)
-        condition_emb = t_emb + c_emb
-
-        # Compute RoPE for this grid size
-        freqs_cis = compute_rope_2d(self.dim_head, h_patch, w_patch, device=x.device)
-
-        for block in self.blocks:
-            x = block(x, condition_emb, freqs_cis, h_patch, w_patch)
-
-        x = self.final_layer(x, condition_emb)
-
-        p = self.patch_size
-        x = rearrange(x, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=p, p2=p, h=h_patch, w=w_patch)
-
-        return x
-
-class PixelDiT(nn.Module):
-    def __init__(
-        self,
-        *,
-        image_size=32,
-        semantic_patch_size=16,
-        channels=3,
-        dit_dim=128,    # Dimension for Semantic Path
-        pit_dim=64,     # Dimension for Pixel Path
-        dit_depth=4,
-        pit_depth=4,
-        heads=4,
-        dim_head=32,
-        mlp_ratio=4.0,
-        dropout=0.1,
-        num_classes=10,
-        class_dropout_prob=0.1,
-        compress_ratio=2,
-        use_abs_pe=True,
-        qk_norm=False
-    ):
-        super().__init__()
-        self.image_size = image_size
-        self.semantic_patch_size = semantic_patch_size
-        self.use_abs_pe = use_abs_pe
-        self.compress_ratio = compress_ratio
-        self.num_classes = num_classes
-        self.class_dropout_prob = class_dropout_prob
-        
-        self.base_h_sem = self.base_w_sem = image_size // semantic_patch_size
-        self.base_h_pix = self.base_w_pix = image_size
-        
-        # --- 1. Semantic Stream (DiT) ---
-        self.to_semantic_patch = nn.Sequential(
-            nn.Conv2d(channels, dit_dim, kernel_size=semantic_patch_size, stride=semantic_patch_size),
-            Rearrange('b c h w -> b (h w) c'),
-        )
-        
-        if use_abs_pe:
-            self.semantic_pos_embedding = nn.Parameter(torch.randn(1, self.base_h_sem * self.base_w_sem, dit_dim))
-        
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dit_dim),
-            nn.Linear(dit_dim, dit_dim * 4),
-            nn.SiLU(),
-            nn.Linear(dit_dim * 4, dit_dim)
-        )
-        
-        self.class_embed = nn.Embedding(num_classes + 1, dit_dim)
-        
-        self.dit_blocks = nn.ModuleList([
-            DiTBlock(dit_dim, heads, dim_head, mlp_ratio, dropout, qk_norm=qk_norm)
-            for _ in range(dit_depth)
-        ])
-        
-        # --- 2. Pixel Stream (PiT) ---
-        self.to_pixel_patch = nn.Sequential(
-            nn.Conv2d(channels, pit_dim, kernel_size=1, stride=1),
-            Rearrange('b c h w -> b (h w) c'),
-        )
-        
-        if use_abs_pe:
-            self.pixel_pos_embedding = nn.Parameter(torch.randn(1, self.base_h_pix * self.base_w_pix, pit_dim))
-        self.up_conv = nn.Conv2d(dit_dim, dit_dim, kernel_size=3, stride=1, padding=1)
-
-        self.pit_blocks = nn.ModuleList([
-            PixelDiTBlock(pit_dim, heads, dit_dim, dim_head, mlp_ratio, dropout, compress_ratio)
-            for _ in range(pit_depth)
-        ])
-        
-        self.final_layer = PixelDiTFinalLayer(pit_dim, dit_dim, channels)
-        
-    def forward(self, x, times, y=None):
-        b, c, h, w = x.shape
-        
-        # --- Semantic Processing ---
-        s = self.to_semantic_patch(x)
-        h_sem, w_sem = h // self.semantic_patch_size, w // self.semantic_patch_size
-        
-        if self.use_abs_pe:
-            pe_sem = interpolate_pos_embed(self.semantic_pos_embedding, self.base_h_sem, self.base_w_sem, h_sem, w_sem)
-            s = s + pe_sem
-        
-        t_emb = self.time_mlp(times)
-        if y is None:
-            y = torch.full((b,), self.num_classes, device=x.device, dtype=torch.long)
-            
-        c_emb = self.class_embed(y)
-        condition_emb = t_emb + c_emb
-
-        # Compute RoPE for Semantic Path
-        freqs_cis_sem = compute_rope_2d(
-            self.dit_blocks[0].attn.dim_head,
-            h_sem, w_sem, device=x.device
-        )
-
-        for block in self.dit_blocks:
-            s = block(s, condition_emb, freqs_cis_sem, h_sem, w_sem)
-
-        # Bridge: Interpolate Semantic Outputs to condition Pixel Stream
-        s_img = rearrange(s, 'b (h w) c -> b c h w', h=h_sem, w=w_sem)
-        s_up = F.interpolate(s_img, size=(h, w), mode='bilinear', align_corners=False)
-        s_up = self.up_conv(s_up)
-        cond_pit = rearrange(s_up, 'b c h w -> b (h w) c')
-        
-        # --- Pixel Processing ---
-        p = self.to_pixel_patch(x)
-        if self.use_abs_pe:
-            pe_pix = interpolate_pos_embed(self.pixel_pos_embedding, self.base_h_pix, self.base_w_pix, h, w)
-            p = p + pe_pix
-
-        # Compute RoPE for Pixel Path
-        h_comp, w_comp = h // self.compress_ratio, w // self.compress_ratio
-        freqs_cis_pix = compute_rope_2d(
-            self.pit_blocks[0].attn.dim_head,
-            h_comp, w_comp, device=x.device
-        )
-
-        for block in self.pit_blocks:
-            p = block(p, cond_pit, h, w, freqs_cis_pix)
-
-        x = self.final_layer(p, cond_pit)
-        x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
-
-        return x
-
-class MMDiT(nn.Module):
-    def __init__(
-        self,
-        *,
-        image_size=32,
-        patch_size=4,
-        channels=3,
-        dim=128,
-        depth=6,
-        heads=4,
-        dim_head=32,
-        mlp_ratio=4.0,
-        dropout=0.1,
-        num_classes=10,
-        num_registers=4,
-        class_dropout_prob=0.1,
-        use_abs_pe=True,
-        qk_norm=False
-    ):
-        super().__init__()
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.use_abs_pe = use_abs_pe
-        self.num_classes = num_classes
-        self.num_registers = num_registers
-        self.class_dropout_prob = class_dropout_prob
-        
-        self.base_h = self.base_w = image_size // patch_size
-        
-        self.to_patch_embedding = nn.Sequential(
-            nn.Conv2d(channels, dim, kernel_size=patch_size, stride=patch_size),
-            Rearrange('b c h w -> b (h w) c'),
-        )
-
-        if use_abs_pe:
-            self.pos_embedding = nn.Parameter(torch.randn(1, self.base_h * self.base_w, dim))
-
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim * 4),
-            nn.SiLU(),
-            nn.Linear(dim * 4, dim)
-        )
-
-        # Learnable registers for each class
-        self.class_registers = nn.Parameter(torch.randn(num_classes + 1, num_registers, dim))
-        self.register_pos_embed = nn.Parameter(torch.randn(1, num_registers, dim))
-
-        self.blocks = nn.ModuleList([
-            MMDiTBlock(dim, heads, dim_head, mlp_ratio, dropout, qk_norm=qk_norm)
-            for _ in range(depth)
-        ])
-
-        self.final_layer = FinalLayer(dim, channels * patch_size ** 2)
-
-    def forward(self, x, times, y=None):
-        b, c, h, w = x.shape
-        h_patch, w_patch = h // self.patch_size, w // self.patch_size
-        
-        x = self.to_patch_embedding(x)
-
-        if self.use_abs_pe:
-            pe = interpolate_pos_embed(self.pos_embedding, self.base_h, self.base_w, h_patch, w_patch)
-            x = x + pe
-
-        t_emb = self.time_mlp(times)
-        if y is None:
-            y = torch.full((b,), self.num_classes, device=x.device, dtype=torch.long)
-
-        # Get registers for the classes
-        c_regs = self.class_registers[y] # (B, num_registers, dim)
-        c_regs = c_regs + self.register_pos_embed
-        
-        # Global conditioning is the average of registers
-        c_global = c_regs.mean(dim=1) # (B, dim)
-        condition_emb = t_emb + c_global
-
-        # Compute RoPE for Image tokens
-        freqs_cis = compute_rope_2d(self.blocks[0].attn.dim_head, h_patch, w_patch, device=x.device)
-
-        for block in self.blocks:
-            x, c_regs = block(x, c_regs, condition_emb, freqs_cis, h_patch, w_patch)
-
-        x = self.final_layer(x, condition_emb)
-
-        p = self.patch_size
-        x = rearrange(x, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=p, p2=p, h=h_patch, w=w_patch)
-
-        return x
-
 class MMPixelDiT(nn.Module):
     def __init__(
         self,
@@ -896,3 +598,28 @@ class MMPixelDiT(nn.Module):
         x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
 
         return x
+
+def MMPixelDiT_Tiny(**kwargs):
+    kwargs.pop('num_classes', None)
+    compress_ratio = kwargs.pop('compress_ratio', 4)
+    return MMPixelDiT(
+        dit_dim=128, 
+        pit_dim=16, 
+        dit_depth=6, 
+        pit_depth=2, 
+        heads=4, 
+        dim_head=32, 
+        mlp_ratio=4.0, 
+        qk_norm='rmsnorm', 
+        compress_ratio=compress_ratio, 
+        num_registers=4, 
+        **kwargs
+    )
+
+def MMPixelDiT_Tiny_4(**kwargs):
+    return MMPixelDiT_Tiny(semantic_patch_size=4, compress_ratio=4, **kwargs)
+
+def create_mmpixeldit_model(model_name, **kwargs):
+    if model_name.lower() == 'mmpixeldit-tiny/4':
+        return MMPixelDiT_Tiny_4(**kwargs)
+    raise ValueError(f"Unsupported MMPixelDiT model: {model_name}")

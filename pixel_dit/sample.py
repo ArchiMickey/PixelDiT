@@ -31,9 +31,8 @@ import torch
 from torchvision.utils import save_image, make_grid
 from PIL import Image
 
-from pixel_dit.model import DiT, PixelDiT
 from pixel_dit.flow import RectifiedFlow
-from pixel_dit.config import get_model_config, get_dataset_config
+from pixel_dit.config import get_dataset_config
 from pixel_dit.utils import (
     create_model,
     get_output_dirs,
@@ -61,9 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--model',
         type=str,
-        choices=['dit', 'pixeldit', 'mmdit', 'mmpixeldit'],
         default=None,
-        help='Model type (auto-detected from checkpoint if None)',
+        help='Model type and size (e.g., dit-tiny, mmdit-tiny) (auto-detected from checkpoint if None)',
     )
     parser.add_argument(
         '--dataset',
@@ -191,7 +189,6 @@ def sample():
         print(f"Auto-detected dataset: {dataset_name}")
     
     # Get configurations
-    model_config = get_model_config(model_type, dataset_name)
     dataset_config = get_dataset_config(dataset_name)
     
     # Get output directories
@@ -219,7 +216,7 @@ def sample():
     print(f"Checkpoint: {args.checkpoint}")
     
     # Create model
-    model = create_model(model_type, dataset_config, model_config)
+    model = create_model(model_type, dataset_config)
     
     # Load checkpoint
     if not os.path.exists(args.checkpoint):
@@ -250,7 +247,13 @@ def sample():
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     # Create RectifiedFlow wrapper
-    rf = RectifiedFlow(model, class_dropout_prob=model_config.class_dropout_prob)
+    rf = RectifiedFlow(
+        model, 
+        class_dropout_prob=0.1,
+        t_eps=5e-2,
+        P_mean=-0.8,
+        P_std=0.8,
+    )
     
     print(f"Generating {args.num_samples} samples with {args.num_steps} steps...")
     

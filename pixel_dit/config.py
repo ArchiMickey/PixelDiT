@@ -42,52 +42,6 @@ class BaseConfig:
 
 
 @dataclass
-class ModelConfig(BaseConfig):
-    """Configuration for DiT/PixelDiT/MMDiT/MMPixelDiT models."""
-    # Architecture type
-    model_type: str = 'dit'  # 'dit', 'pixeldit', 'mmdit', or 'mmpixeldit'
-    
-    # Image parameters
-    image_size: int = 28
-    patch_size: int = 4  # For DiT/MMDiT; semantic_patch_size for PixelDiT/MMPixelDiT
-    channels: int = 1
-    
-    # DiT/MMDiT-specific parameters
-    dim: int = 128
-    depth: int = 6
-    heads: int = 4
-    dim_head: int = 32
-    mlp_ratio: float = 4.0
-    qk_norm: str = None
-    
-    # PixelDiT/MMPixelDiT-specific parameters
-    dit_dim: int = 128  # Semantic path dimension
-    pit_dim: int = 16   # Pixel path dimension
-    dit_depth: int = 6  # Semantic path depth
-    pit_depth: int = 2  # Pixel path depth
-    
-    # MMDiT/MMPixelDiT-specific parameters
-    num_registers: int = 4
-    
-    # Regularization
-    dropout: float = 0.0
-    
-    # Class-conditional generation
-    num_classes: int = 10
-    class_dropout_prob: float = 0.1
-    
-    # PixelDiT/MMPixelDiT-specific
-    compress_ratio: int = 4
-    use_abs_pe: bool = True
-    semantic_patch_size: Optional[int] = None  # If None, uses patch_size
-
-    # RectifiedFlow parameters
-    t_eps: float = 1e-5
-    P_mean: float = 0.0
-    P_std: float = 1.0
-
-
-@dataclass
 class DatasetConfig(BaseConfig):
     """Configuration for dataset."""
     name: str = 'mnist'
@@ -115,32 +69,6 @@ class TrainingConfig(BaseConfig):
     
     # Resume from checkpoint
     resume: Optional[str] = None
-
-
-def get_model_config(model_type: str, dataset_name: str) -> ModelConfig:
-    """
-    Get model configuration for a specific model type and dataset.
-    
-    Args:
-        model_type: 'dit', 'pixeldit', 'mmdit', or 'mmpixeldit'
-        dataset_name: 'mnist' or 'cifar10'
-    
-    Returns:
-        ModelConfig with appropriate settings
-    
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-    """
-    config_path = _CONFIG_DIR / "models" / f"{model_type.lower()}_{dataset_name.lower()}.yaml"
-    
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Config file not found: {config_path}. "
-            f"Supported combinations: dit_mnist, dit_cifar10, pixeldit_mnist, pixeldit_cifar10, "
-            f"mmdit_mnist, mmdit_cifar10, mmpixeldit_mnist, mmpixeldit_cifar10"
-        )
-    
-    return ModelConfig.from_yaml(str(config_path))
 
 
 def get_dataset_config(dataset_name: str) -> DatasetConfig:

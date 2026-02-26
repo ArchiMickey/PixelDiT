@@ -28,13 +28,10 @@ from torchvision.utils import save_image
 from tqdm import tqdm
 from accelerate import Accelerator
 
-from pixel_dit.model import DiT, PixelDiT
 from pixel_dit.flow import RectifiedFlow
 from pixel_dit.config import (
-    ModelConfig,
     DatasetConfig,
     TrainingConfig,
-    get_model_config,
     get_dataset_config,
 )
 from pixel_dit.utils import (
@@ -69,9 +66,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--model',
         type=str,
-        choices=['dit', 'pixeldit', 'mmdit', 'mmpixeldit'],
-        default='dit',
-        help='Model type to train',
+        default='mmpixeldit-tiny/4',
+        help='Model type and size to train (e.g., dit-tiny/4, mmdit-tiny/4, pixeldit-tiny/4, mmpixeldit-tiny/4)',
     )
     parser.add_argument(
         '--dataset',
@@ -172,7 +168,6 @@ def train():
     device = accelerator.device
     
     # Get configurations
-    model_config = get_model_config(args.model, args.dataset)
     dataset_config = get_dataset_config(args.dataset)
     
     # Override resolution if provided
@@ -201,7 +196,7 @@ def train():
     )
     
     # Create model
-    model = create_model(args.model, dataset_config, model_config)
+    model = create_model(args.model, dataset_config)
     
     # Create EMA model
     ema_model = None
@@ -213,10 +208,10 @@ def train():
     # Create RectifiedFlow wrapper
     rf = RectifiedFlow(
         model, 
-        class_dropout_prob=model_config.class_dropout_prob,
-        t_eps=model_config.t_eps,
-        P_mean=model_config.P_mean,
-        P_std=model_config.P_std
+        class_dropout_prob=0.1,
+        t_eps=5e-2,
+        P_mean=-0.8,
+        P_std=0.8,
     )
     
     # Create optimizer
@@ -286,7 +281,13 @@ def train():
                     with torch.no_grad():
                         # Use EMA model for sampling if available, otherwise use base model
                         unwrapped_model = ema_model if ema_model is not None else accelerator.unwrap_model(model)
-                        unwrapped_rf = RectifiedFlow(unwrapped_model, class_dropout_prob=model_config.class_dropout_prob, t_eps=model_config.t_eps, P_mean=model_config.P_mean, P_std=model_config.P_std)
+                        unwrapped_rf = RectifiedFlow(
+                            unwrapped_model, 
+                            class_dropout_prob=0.1,
+                            t_eps=5e-2,
+                            P_mean=-0.8,
+                            P_std=0.8,
+                        )
                         
                         # Sample with labels for visualization
                         # For large num_classes, sample a reasonable set of classes
@@ -324,7 +325,6 @@ def train():
                     model_type=args.model,
                     dataset_name=args.dataset,
                     config={
-                        'model': model_config.to_dict(),
                         'dataset': dataset_config.to_dict(),
                         'training': {
                             'batch_size': args.batch_size,
